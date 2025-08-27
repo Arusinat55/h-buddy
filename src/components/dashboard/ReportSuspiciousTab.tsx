@@ -19,105 +19,116 @@ import {
   Clock,
   CheckCircle
 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { useReports } from "@/hooks/useReports";
 
 const ReportSuspiciousTab = () => {
   const [reportData, setReportData] = useState({
-    type: "",
-    urgency: "",
-    source: "",
+    entity_type: "",
+    entity_value: "",
+    threat_level: "",
     description: "",
-    evidence: "",
-    contactInfo: "",
-    files: [] as File[]
   });
+  const [files, setFiles] = useState<File[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { toast } = useToast();
+  const { createSuspiciousReport, uploadFile, suspiciousReports, loading } = useReports();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     
-    // Submit suspicious activity report - This will connect to Supabase when integrated
-    console.log("Submitting suspicious activity report:", reportData);
-    
-    // Reset form after submission
-    setTimeout(() => {
-      setReportData({
-        type: "",
-        urgency: "",
-        source: "",
-        description: "",
-        evidence: "",
-        contactInfo: "",
-        files: []
+    try {
+      // Upload files first if any
+      let fileUrls: string[] = [];
+      if (files.length > 0) {
+        const uploadPromises = files.map(async (file) => {
+          const tempId = Date.now().toString();
+          const result = await uploadFile(file, tempId);
+          return result.data;
+        });
+        
+        const uploadResults = await Promise.all(uploadPromises);
+        fileUrls = uploadResults.filter(url => url !== null) as string[];
+      }
+
+      // Create the suspicious report
+      const { data: report, error: reportError } = await createSuspiciousReport({
+        entity_type: reportData.entity_type,
+        entity_value: reportData.entity_value,
+        description: reportData.description,
+        threat_level: reportData.threat_level || 'medium',
+        evidence_files: fileUrls.length > 0 ? fileUrls : null
       });
+
+      if (reportError || !report) {
+        throw new Error(reportError?.message || 'Failed to create report');
+      }
+
+      toast({
+        title: "Report Submitted",
+        description: "Your suspicious activity report has been submitted successfully and is under review."
+      });
+
+      // Reset form
+      setReportData({
+        entity_type: "",
+        entity_value: "",
+        threat_level: "",
+        description: "",
+      });
+      setFiles([]);
+
+    } catch (error) {
+      console.error('Submit error:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to submit report. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
       setIsSubmitting(false);
-    }, 2000);
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       const newFiles = Array.from(e.target.files);
-      setReportData(prev => ({
-        ...prev,
-        files: [...prev.files, ...newFiles]
-      }));
+      setFiles(prev => [...prev, ...newFiles]);
     }
   };
 
   const removeFile = (index: number) => {
-    setReportData(prev => ({
-      ...prev,
-      files: prev.files.filter((_, i) => i !== index)
-    }));
+    setFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  // Mock existing reports
-  const suspiciousReports = [
-    {
-      id: "SA-001",
-      type: "Phishing Email",
-      urgency: "High",
-      status: "Investigating",
-      date: "2024-01-23",
-      source: "Email",
-      progress: 75
-    },
-    {
-      id: "SA-002",
-      type: "Malware Detection",
-      urgency: "Critical",
-      status: "Resolved",
-      date: "2024-01-21",
-      source: "Network Scan",
-      progress: 100
-    },
-    {
-      id: "SA-003",
-      type: "Suspicious Login",
-      urgency: "Medium",
-      status: "Under Review",
-      date: "2024-01-24",
-      source: "System Alert",
-      progress: 40
-    }
-  ];
-
-  const getUrgencyColor = (urgency: string) => {
-    switch (urgency) {
-      case "Critical": return "text-red-600 border-red-600";
-      case "High": return "text-orange-600 border-orange-600";
-      case "Medium": return "text-yellow-600 border-yellow-600";
-      case "Low": return "text-green-600 border-green-600";
+  const getThreatLevelColor = (threatLevel: string) => {
+    switch (threatLevel) {
+      case "critical": return "text-red-600 border-red-600";
+      case "high": return "text-orange-600 border-orange-600";
+      case "medium": return "text-yellow-600 border-yellow-600";
+      case "low": return "text-green-600 border-green-600";
       default: return "text-gray-600 border-gray-600";
     }
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "Resolved": return "text-green-600 border-green-600";
-      case "Investigating": return "text-blue-600 border-blue-600";
-      case "Under Review": return "text-orange-600 border-orange-600";
+      case "verified": return "text-green-600 border-green-600";
+      case "investigating": return "text-blue-600 border-blue-600";
+      case "reported": return "text-yellow-600 border-yellow-600";
+      case "false_positive": return "text-red-600 border-red-600";
       default: return "text-gray-600 border-gray-600";
+    }
+  };
+
+  const getStatusLabel = (status: string) => {
+    switch (status) {
+      case "reported": return "Reported";
+      case "investigating": return "Investigating";
+      case "verified": return "Verified";
+      case "false_positive": return "False Positive";
+      default: return status;
     }
   };
 
@@ -147,64 +158,51 @@ const ReportSuspiciousTab = () => {
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="type">Threat Type</Label>
+                <Label htmlFor="entity_type">Entity Type</Label>
                 <Select
-                  value={reportData.type}
-                  onValueChange={(value) => setReportData({...reportData, type: value})}
+                  value={reportData.entity_type}
+                  onValueChange={(value) => setReportData({...reportData, entity_type: value})}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select threat type" />
+                    <SelectValue placeholder="Select entity type" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="phishing">Phishing Email</SelectItem>
-                    <SelectItem value="malware">Malware/Virus</SelectItem>
-                    <SelectItem value="social-engineering">Social Engineering</SelectItem>
-                    <SelectItem value="unauthorized-access">Unauthorized Access</SelectItem>
-                    <SelectItem value="data-breach">Data Breach</SelectItem>
-                    <SelectItem value="ddos">DDoS Attack</SelectItem>
-                    <SelectItem value="suspicious-website">Suspicious Website</SelectItem>
-                    <SelectItem value="ransomware">Ransomware</SelectItem>
+                    <SelectItem value="mobile_app">Mobile App</SelectItem>
+                    <SelectItem value="phone_number">Phone Number</SelectItem>
+                    <SelectItem value="social_media_id">Social Media ID</SelectItem>
+                    <SelectItem value="upi_id">UPI ID</SelectItem>
+                    <SelectItem value="website">Website</SelectItem>
                     <SelectItem value="other">Other</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
+              <div className="space-y-2">
+                <Label htmlFor="entity_value">Entity Value</Label>
+                <Input
+                  id="entity_value"
+                  placeholder="Enter the suspicious entity (URL, phone number, app name, etc.)"
+                  value={reportData.entity_value}
+                  onChange={(e) => setReportData({...reportData, entity_value: e.target.value})}
+                  required
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="urgency">Urgency Level</Label>
+                  <Label htmlFor="threat_level">Threat Level</Label>
                   <Select
-                    value={reportData.urgency}
-                    onValueChange={(value) => setReportData({...reportData, urgency: value})}
+                    value={reportData.threat_level}
+                    onValueChange={(value) => setReportData({...reportData, threat_level: value})}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select urgency" />
+                      <SelectValue placeholder="Select threat level" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="low">Low</SelectItem>
                       <SelectItem value="medium">Medium</SelectItem>
                       <SelectItem value="high">High</SelectItem>
                       <SelectItem value="critical">Critical</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="source">Source</Label>
-                  <Select
-                    value={reportData.source}
-                    onValueChange={(value) => setReportData({...reportData, source: value})}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="How did you discover this?" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="email">Email</SelectItem>
-                      <SelectItem value="website">Website</SelectItem>
-                      <SelectItem value="phone">Phone Call</SelectItem>
-                      <SelectItem value="text">Text Message</SelectItem>
-                      <SelectItem value="system-alert">System Alert</SelectItem>
-                      <SelectItem value="colleague">Colleague Report</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -219,27 +217,6 @@ const ReportSuspiciousTab = () => {
                   onChange={(e) => setReportData({...reportData, description: e.target.value})}
                   rows={4}
                   required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="evidence">Evidence/Technical Details</Label>
-                <Textarea
-                  id="evidence"
-                  placeholder="Include URLs, IP addresses, email headers, file names, error messages, or any other technical evidence..."
-                  value={reportData.evidence}
-                  onChange={(e) => setReportData({...reportData, evidence: e.target.value})}
-                  rows={3}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="contactInfo">Contact Information (Optional)</Label>
-                <Input
-                  id="contactInfo"
-                  placeholder="Alternative contact method if we need more information"
-                  value={reportData.contactInfo}
-                  onChange={(e) => setReportData({...reportData, contactInfo: e.target.value})}
                 />
               </div>
 
@@ -268,9 +245,9 @@ const ReportSuspiciousTab = () => {
                   </label>
                 </div>
 
-                {reportData.files.length > 0 && (
+                {files.length > 0 && (
                   <div className="space-y-2">
-                    {reportData.files.map((file, index) => (
+                    {files.map((file, index) => (
                       <div
                         key={index}
                         className="flex items-center justify-between p-2 bg-muted rounded-md"
@@ -377,35 +354,69 @@ const ReportSuspiciousTab = () => {
         <CardHeader>
           <CardTitle>Your Recent Reports</CardTitle>
           <CardDescription>
-            Track the status of your submitted suspicious activity reports
+            Track the status of your submitted suspicious activity reports ({suspiciousReports.length} total)
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {suspiciousReports.map((report) => (
+          {loading ? (
+            <div className="space-y-4">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="border rounded-lg p-4 animate-pulse">
+                  <div className="h-4 bg-muted rounded w-3/4 mb-2"></div>
+                  <div className="h-3 bg-muted rounded w-1/2 mb-2"></div>
+                  <div className="h-6 bg-muted rounded w-20"></div>
+                </div>
+              ))}
+            </div>
+          ) : suspiciousReports.length === 0 ? (
+            <div className="text-center py-8">
+              <AlertTriangle className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No Reports Yet</h3>
+              <p className="text-muted-foreground">
+                You haven't submitted any suspicious activity reports yet. Use the form above to submit your first report.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {suspiciousReports.map((report) => (
               <div
                 key={report.id}
-                className="border rounded-lg p-4 hover:shadow-md transition-shadow"
-              >
-                <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-medium capitalize">{report.entity_type.replace('_', ' ')}</h4>
+                      <Badge variant="outline" className={getThreatLevelColor(report.threat_level || 'medium')}>
+                        {report.threat_level || 'medium'}
                   <div className="flex items-center gap-3">
                     <h4 className="font-medium">{report.type}</h4>
                     <Badge variant="outline" className={getUrgencyColor(report.urgency)}>
-                      {report.urgency}
+                      {getStatusLabel(report.status)}
                     </Badge>
                   </div>
-                  <Badge variant="outline" className={getStatusColor(report.status)}>
+                      <p className="font-mono text-sm">{report.id.slice(0, 8)}...</p>
                     {report.status}
                   </Badge>
-                </div>
-
+                      <span className="text-sm text-muted-foreground">Entity Value:</span>
+                      <p className="text-sm truncate">{report.entity_value}</p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
                   <div>
                     <span className="text-sm text-muted-foreground">Report ID:</span>
-                    <p className="font-mono text-sm">{report.id}</p>
+                      <p className="text-sm">{new Date(report.created_at).toLocaleDateString()}</p>
                   </div>
                   <div>
                     <span className="text-sm text-muted-foreground">Source:</span>
+                  <div className="mb-3">
+                    <p className="text-sm text-muted-foreground line-clamp-2">
+                      {report.description}
+                    </p>
+                  </div>
+
+                  {report.evidence_files && report.evidence_files.length > 0 && (
+                    <div className="mb-3">
+                      <p className="text-sm font-medium mb-1">Evidence Files:</p>
+                      <p className="text-sm text-muted-foreground">
+                        {report.evidence_files.length} file(s) attached
+                      </p>
+                    </div>
+                  )}
+
                     <p className="text-sm">{report.source}</p>
                   </div>
                   <div>
@@ -422,7 +433,7 @@ const ReportSuspiciousTab = () => {
                 </div>
               </div>
             ))}
-          </div>
+          )}
         </CardContent>
       </Card>
     </div>

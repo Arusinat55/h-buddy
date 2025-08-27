@@ -31,7 +31,7 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { profile, loading: profileLoading } = useProfile();
-  const { reports, loading: reportsLoading } = useReports();
+  const { grievanceReports, suspiciousReports, loading: reportsLoading } = useReports();
 
   const handleSignOut = async () => {
     try {
@@ -58,20 +58,27 @@ const Dashboard = () => {
     organization: profile?.organization || "",
     avatar: profile?.avatar_url || "",
     joinDate: profile?.created_at ? new Date(profile.created_at).toLocaleDateString() : "",
-    reportsSubmitted: reports.length,
+    reportsSubmitted: grievanceReports.length + suspiciousReports.length,
     status: "Verified"
   };
 
-  const pendingReports = reports.filter(r => r.status === 'pending').length;
-  const resolvedReports = reports.filter(r => r.status === 'resolved').length;
+  const allReports = [...grievanceReports, ...suspiciousReports];
+  const pendingReports = [
+    ...grievanceReports.filter(r => r.status === 'pending'),
+    ...suspiciousReports.filter(r => r.status === 'reported')
+  ].length;
+  const resolvedReports = [
+    ...grievanceReports.filter(r => r.status === 'resolved'),
+    ...suspiciousReports.filter(r => r.status === 'verified')
+  ].length;
   
   const stats = [
     {
       title: "Total Reports",
-      value: reports.length.toString(),
+      value: allReports.length.toString(),
       description: "Reports submitted",
       icon: FileText,
-      trend: reportsLoading ? "Loading..." : `${reports.length} total`
+      trend: reportsLoading ? "Loading..." : `${allReports.length} total`
     },
     {
       title: "Pending Review",

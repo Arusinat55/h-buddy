@@ -15,14 +15,16 @@ const ReportGrievanceTab = () => {
   const [formData, setFormData] = useState({
     title: "",
     description: "",
-    category: "",
-    severity: ""
+    complaint_category: "",
+    subcategory: "",
+    location: "",
+    priority_level: ""
   });
   const [files, setFiles] = useState<File[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
-  const { createReport, uploadFile } = useReports();
+  const { createGrievanceReport, uploadFile, grievanceReports, loading } = useReports();
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -40,27 +42,33 @@ const ReportGrievanceTab = () => {
     setIsSubmitting(true);
 
     try {
-      // Create the report first
-      const { data: report, error: reportError } = await createReport({
-        type: 'grievance',
+      // Upload files first if any
+      let fileUrls: string[] = [];
+      if (files.length > 0) {
+        const uploadPromises = files.map(async (file) => {
+          const tempId = Date.now().toString();
+          const result = await uploadFile(file, tempId);
+          return result.data;
+        });
+        
+        const uploadResults = await Promise.all(uploadPromises);
+        fileUrls = uploadResults.filter(url => url !== null) as string[];
+      }
+
+      // Create the grievance report
+      const { data: report, error: reportError } = await createGrievanceReport({
         title: formData.title,
+        complaint_category: formData.complaint_category,
+        subcategory: formData.subcategory || null,
         description: formData.description,
-        category: formData.category,
-        severity: formData.severity,
-        file_urls: null
+        location: formData.location,
+        priority_level: formData.priority_level || 'medium',
+        evidence_files: fileUrls.length > 0 ? fileUrls : null
       });
 
       if (reportError || !report) {
-        throw new Error('Failed to create report');
+        throw new Error(reportError?.message || 'Failed to create report');
       }
-
-      // Upload files if any
-      const uploadPromises = files.map(file => uploadFile(file, report.id));
-      const uploadResults = await Promise.all(uploadPromises);
-      
-      const fileUrls = uploadResults
-        .filter(result => result.data)
-        .map(result => result.data as string);
 
       toast({
         title: "Report Submitted",
@@ -71,8 +79,10 @@ const ReportGrievanceTab = () => {
       setFormData({
         title: "",
         description: "",
-        category: "",
-        severity: ""
+        complaint_category: "",
+        subcategory: "",
+        location: "",
+        priority_level: ""
       });
       setFiles([]);
 
@@ -80,7 +90,7 @@ const ReportGrievanceTab = () => {
       console.error('Submit error:', error);
       toast({
         title: "Error",
-        description: "Failed to submit report. Please try again.",
+        description: error instanceof Error ? error.message : "Failed to submit report. Please try again.",
         variant: "destructive"
       });
     } finally {
@@ -88,53 +98,36 @@ const ReportGrievanceTab = () => {
     }
   };
 
-  // Mock existing reports
-  const existingReports = [
-    {
-      id: "GR-001",
-      title: "Unauthorized Access Attempt",
-      category: "Access Control",
-      priority: "High",
-      status: "Under Review",
-      date: "2024-01-20",
-      progress: 60
-    },
-    {
-      id: "GR-002",
-      title: "Policy Violation Report",
-      category: "Policy",
-      priority: "Medium",
-      status: "Resolved",
-      date: "2024-01-15",
-      progress: 100
-    },
-    {
-      id: "GR-003",
-      title: "System Vulnerability",
-      category: "Technical",
-      priority: "Critical",
-      status: "In Progress",
-      date: "2024-01-22",
-      progress: 30
-    }
-  ];
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "Resolved": return "text-green-600 border-green-600";
-      case "Under Review": return "text-blue-600 border-blue-600";
-      case "In Progress": return "text-orange-600 border-orange-600";
+      case "resolved": return "text-green-600 border-green-600";
+      case "under_review": return "text-blue-600 border-blue-600";
+      case "investigating": return "text-orange-600 border-orange-600";
+      case "pending": return "text-yellow-600 border-yellow-600";
+      case "rejected": return "text-red-600 border-red-600";
       default: return "text-gray-600 border-gray-600";
     }
   };
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case "Critical": return "text-red-600 border-red-600";
-      case "High": return "text-orange-600 border-orange-600";
-      case "Medium": return "text-yellow-600 border-yellow-600";
-      case "Low": return "text-green-600 border-green-600";
+      case "critical": return "text-red-600 border-red-600";
+      case "high": return "text-orange-600 border-orange-600";
+      case "medium": return "text-yellow-600 border-yellow-600";
+      case "low": return "text-green-600 border-green-600";
       default: return "text-gray-600 border-gray-600";
+    }
+  };
+
+  const getStatusLabel = (status: string) => {
+    switch (status) {
+      case "pending": return "Pending";
+      case "investigating": return "Investigating";
+      case "resolved": return "Resolved";
+      case "rejected": return "Rejected";
+      case "under_review": return "Under Review";
+      default: return status;
     }
   };
 
@@ -167,20 +160,20 @@ const ReportGrievanceTab = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="category">Category</Label>
+                  <Label htmlFor="complaint_category">Category</Label>
                   <Select
-                    value={formData.category}
-                    onValueChange={(value) => setFormData({...formData, category: value})}
+                    value={formData.complaint_category}
+                    onValueChange={(value) => setFormData({...formData, complaint_category: value})}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select category" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="access-control">Access Control</SelectItem>
-                      <SelectItem value="policy">Policy Violation</SelectItem>
+                      <SelectItem value="cybercrime">Cybercrime</SelectItem>
+                      <SelectItem value="fraud">Fraud</SelectItem>
+                      <SelectItem value="harassment">Online Harassment</SelectItem>
+                      <SelectItem value="privacy">Privacy Violation</SelectItem>
                       <SelectItem value="technical">Technical Issue</SelectItem>
-                      <SelectItem value="harassment">Harassment</SelectItem>
-                      <SelectItem value="discrimination">Discrimination</SelectItem>
                       <SelectItem value="other">Other</SelectItem>
                     </SelectContent>
                   </Select>
@@ -189,8 +182,8 @@ const ReportGrievanceTab = () => {
                 <div className="space-y-2">
                   <Label htmlFor="priority">Priority Level</Label>
                   <Select
-                    value={formData.severity}
-                    onValueChange={(value) => setFormData({...formData, severity: value})}
+                    value={formData.priority_level}
+                    onValueChange={(value) => setFormData({...formData, priority_level: value})}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select priority" />
@@ -203,6 +196,27 @@ const ReportGrievanceTab = () => {
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="subcategory">Subcategory (Optional)</Label>
+                <Input
+                  id="subcategory"
+                  placeholder="Specific subcategory if applicable"
+                  value={formData.subcategory}
+                  onChange={(e) => setFormData({...formData, subcategory: e.target.value})}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="location">Location</Label>
+                <Input
+                  id="location"
+                  placeholder="Where did this incident occur?"
+                  value={formData.location}
+                  onChange={(e) => setFormData({...formData, location: e.target.value})}
+                  required
+                />
               </div>
 
               <div className="space-y-2">
@@ -340,35 +354,66 @@ const ReportGrievanceTab = () => {
         <CardHeader>
           <CardTitle>Your Recent Reports</CardTitle>
           <CardDescription>
-            Track the status of your submitted grievance reports
+            Track the status of your submitted grievance reports ({grievanceReports.length} total)
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {existingReports.map((report) => (
+          {loading ? (
+            <div className="space-y-4">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="border rounded-lg p-4 animate-pulse">
+                  <div className="h-4 bg-muted rounded w-3/4 mb-2"></div>
+                  <div className="h-3 bg-muted rounded w-1/2 mb-2"></div>
+                  <div className="h-6 bg-muted rounded w-20"></div>
+                </div>
+              ))}
+            </div>
+          ) : grievanceReports.length === 0 ? (
+            <div className="text-center py-8">
+              <FileText className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No Reports Yet</h3>
+              <p className="text-muted-foreground">
+                You haven't submitted any grievance reports yet. Use the form above to submit your first report.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {grievanceReports.map((report) => (
               <div
                 key={report.id}
                 className="border rounded-lg p-4 hover:shadow-md transition-shadow"
-              >
-                <div className="flex items-center justify-between mb-3">
+                      <p className="font-mono text-sm">{report.id.slice(0, 8)}...</p>
+                        {report.priority_level || 'medium'}
                   <div className="flex items-center gap-3">
                     <h4 className="font-medium">{report.title}</h4>
-                    <Badge variant="outline" className={getPriorityColor(report.priority)}>
-                      {report.priority}
+                      <p className="text-sm capitalize">{report.complaint_category}</p>
+                      {getStatusLabel(report.status)}
                     </Badge>
-                  </div>
-                  <Badge variant="outline" className={getStatusColor(report.status)}>
+                      <span className="text-sm text-muted-foreground">Location:</span>
+                      <p className="text-sm">{report.location}</p>
                     {report.status}
                   </Badge>
                 </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
-                  <div>
-                    <span className="text-sm text-muted-foreground">Report ID:</span>
-                    <p className="font-mono text-sm">{report.id}</p>
-                  </div>
+                  <div className="mb-3">
+                    <p className="text-sm text-muted-foreground line-clamp-2">
+                      {report.description}
+                    </p>
                   <div>
                     <span className="text-sm text-muted-foreground">Category:</span>
+                  <div className="flex items-center justify-between text-xs text-muted-foreground mb-3">
+                    <span>Submitted: {new Date(report.created_at).toLocaleDateString()}</span>
+                    <span>Updated: {new Date(report.updated_at).toLocaleDateString()}</span>
+                  </div>
+
+                  {report.evidence_files && report.evidence_files.length > 0 && (
+                    <div className="mb-3">
+                      <p className="text-sm font-medium mb-1">Evidence Files:</p>
+                      <p className="text-sm text-muted-foreground">
+                        {report.evidence_files.length} file(s) attached
+                      </p>
+                    </div>
+                  )}
+
                     <p className="text-sm">{report.category}</p>
                   </div>
                   <div>
@@ -393,7 +438,7 @@ const ReportGrievanceTab = () => {
                 </div>
               </div>
             ))}
-          </div>
+          )}
         </CardContent>
       </Card>
     </div>

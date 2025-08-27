@@ -5,17 +5,38 @@ import { useReports } from "@/hooks/useReports";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export const MyReportsTab = () => {
-  const { reports, loading } = useReports();
+  const { grievanceReports, suspiciousReports, loading } = useReports();
+
+  // Combine both types of reports for display
+  const allReports = [
+    ...grievanceReports.map(report => ({
+      ...report,
+      type: 'grievance' as const,
+      category: report.complaint_category,
+      severity: report.priority_level
+    })),
+    ...suspiciousReports.map(report => ({
+      ...report,
+      type: 'suspicious' as const,
+      title: `${report.entity_type.replace('_', ' ')} - ${report.entity_value}`,
+      category: report.entity_type,
+      severity: report.threat_level
+    }))
+  ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'pending':
+      case 'reported':
         return <Clock className="h-4 w-4" />;
       case 'under_review':
+      case 'investigating':
         return <AlertTriangle className="h-4 w-4" />;
       case 'resolved':
+      case 'verified':
         return <CheckCircle className="h-4 w-4" />;
       case 'rejected':
+      case 'false_positive':
         return <XCircle className="h-4 w-4" />;
       default:
         return <FileText className="h-4 w-4" />;
@@ -25,15 +46,33 @@ export const MyReportsTab = () => {
   const getStatusVariant = (status: string) => {
     switch (status) {
       case 'pending':
+      case 'reported':
         return 'secondary' as const;
       case 'under_review':
+      case 'investigating':
         return 'default' as const;
       case 'resolved':
+      case 'verified':
         return 'default' as const;
       case 'rejected':
+      case 'false_positive':
         return 'destructive' as const;
       default:
         return 'secondary' as const;
+    }
+  };
+
+  const getStatusLabel = (status: string) => {
+    switch (status) {
+      case 'pending': return 'Pending';
+      case 'reported': return 'Reported';
+      case 'under_review': return 'Under Review';
+      case 'investigating': return 'Investigating';
+      case 'resolved': return 'Resolved';
+      case 'verified': return 'Verified';
+      case 'rejected': return 'Rejected';
+      case 'false_positive': return 'False Positive';
+      default: return status.replace('_', ' ');
     }
   };
 
@@ -83,11 +122,11 @@ export const MyReportsTab = () => {
             My Reports
           </CardTitle>
           <CardDescription>
-            Track the status of your submitted reports ({reports.length} total)
+            Track the status of your submitted reports ({allReports.length} total)
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {reports.length === 0 ? (
+          {allReports.length === 0 ? (
             <div className="text-center py-8">
               <FileText className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
               <h3 className="text-lg font-semibold mb-2">No Reports Yet</h3>
@@ -97,7 +136,7 @@ export const MyReportsTab = () => {
             </div>
           ) : (
             <div className="space-y-4">
-              {reports.map((report) => (
+              {allReports.map((report) => (
                 <div
                   key={report.id}
                   className="border rounded-lg p-4 hover:shadow-md transition-shadow"
@@ -111,7 +150,7 @@ export const MyReportsTab = () => {
                     </div>
                     <Badge variant={getStatusVariant(report.status)} className="flex items-center gap-1">
                       {getStatusIcon(report.status)}
-                      {report.status.replace('_', ' ')}
+                      {getStatusLabel(report.status)}
                     </Badge>
                   </div>
                   
@@ -131,18 +170,12 @@ export const MyReportsTab = () => {
                     <span>Submitted: {formatDate(report.created_at)}</span>
                   </div>
                   
-                  {report.admin_notes && (
-                    <div className="mt-3 p-3 bg-muted rounded-md">
-                      <p className="text-sm font-medium mb-1">Admin Notes:</p>
-                      <p className="text-sm text-muted-foreground">{report.admin_notes}</p>
-                    </div>
-                  )}
-                  
-                  {report.file_urls && report.file_urls.length > 0 && (
+                  {((report.type === 'grievance' && (report as any).evidence_files) || 
+                    (report.type === 'suspicious' && (report as any).evidence_files)) && (
                     <div className="mt-3">
                       <p className="text-sm font-medium mb-1">Attachments:</p>
                       <p className="text-sm text-muted-foreground">
-                        {report.file_urls.length} file(s) attached
+                        {((report as any).evidence_files || []).length} file(s) attached
                       </p>
                     </div>
                   )}
